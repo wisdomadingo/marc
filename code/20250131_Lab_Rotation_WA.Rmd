@@ -1,0 +1,17 @@
+---
+title: "20250131_Lab_Rotation_WA"
+author: "wisdom"
+date: "2025-01-31"
+output: html_document
+---
+
+### Load packages
+```{r}
+
+```
+
+### Load Dataset
+```{r}
+VI_gene_cluster <- readRDS('/restricted/projectnb/pulmseq/dylan/R/Rstudio/MCL/MCL_lahey_new_cohort/VI_gene_clusters.rds')
+```
+

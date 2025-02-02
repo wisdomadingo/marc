@@ -5,13 +5,64 @@ date: "2025-01-31"
 output: html_document
 ---
 
+### Used renv to track packages being used
+
+
+### Install packages
+```{r}
+# if needed, install BiocManager
+if (!require("BiocManager", quietly = TRUE))
+    install.packages("BiocManager")
+
+# install GEOquery
+BiocManager::install("GEOquery")
+
+# install BiomaRt
+BiocManager::install("biomaRt")
+
+# install readxl
+install.packages("readxl")
+
+# Install here
+install.packages("here")
+
+# Install Gitcredits
+install.packages("gitcreds")
+```
+
+
 ### Load packages
 ```{r}
-
+library(GEOquery)
+library(biomaRt)
+library(dplyr)
+library(readxl)
+library(here)
+library(gitcreds)
 ```
 
-### Load Dataset
+### Load Datasets
 ```{r}
-VI_gene_cluster <- readRDS('/restricted/projectnb/pulmseq/dylan/R/Rstudio/MCL/MCL_lahey_new_cohort/VI_gene_clusters.rds')
+# Load VI gene clusters
+VI_gene_cluster <- readRDS(here("data","VI_gene_clusters.rds"))
+
+# Load mouse and rat genes
+mm_core <- read_excel(here("data","pnas.2214888120.sd02.xlsx"), sheet = "Annotation- MM Core", range =cell_cols("G"))
+mm_rim <- read_excel(here("data","pnas.2214888120.sd02.xlsx"), sheet = "Annotation-MM Rim", range =cell_cols("G"))
+rat_core <- read_excel(here("data","pnas.2214888120.sd02.xlsx"), sheet = "Annotation Rat Core", range =cell_cols("G"))
+rat_rim <- read_excel(here("data","pnas.2214888120.sd02.xlsx"), sheet = "Annotation-Rat Rim", range =cell_cols("G"))
 ```
 
+### Convert Mouse and Rat Genes to HUman GEnes
+```{r}
+# Load the function from the external file
+source(here("code","functions","convertGeneList.R")) 
+
+# Convert a list of mouse genes to human genes
+mm_core_human <- convertGeneList(mm_core, from_species = "mouse", to_species = "human", verbose = TRUE)
+
+# Convert a list of rat genes to human genes
+ratGenes <- c("GeneA", "GeneB", "GeneC")
+convertGeneList(ratGenes, from_species = "rat", to_species = "human", verbose = TRUE)
+
+```

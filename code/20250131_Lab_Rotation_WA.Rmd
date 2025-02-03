@@ -12,13 +12,18 @@ output: html_document
 ```{r}
 # if needed, install BiocManager
 if (!require("BiocManager", quietly = TRUE))
-    install.packages("BiocManager")
+  install.packages("BiocManager")
+BiocManager::install(version = "3.20")
 
 # install GEOquery
 BiocManager::install("GEOquery")
 
 # install BiomaRt
 BiocManager::install("biomaRt")
+
+BiocManager::install("org.Hs.eg.db")
+
+install.packages("pheatmap")
 
 # install readxl
 install.packages("readxl")
@@ -28,6 +33,10 @@ install.packages("here")
 
 # Install Gitcredits
 install.packages("gitcreds")
+
+BiocManager::install("ComplexHeatmap")
+
+install.packages("circlize")
 ```
 
 
@@ -36,9 +45,14 @@ install.packages("gitcreds")
 library(GEOquery)
 library(biomaRt)
 library(dplyr)
+library(tidyr)
 library(readxl)
 library(here)
 library(gitcreds)
+library(org.Hs.eg.db)
+library(pheatmap)
+library(ComplexHeatmap)
+library(circlize)
 ```
 
 ### Load Datasets
@@ -47,22 +61,122 @@ library(gitcreds)
 VI_gene_cluster <- readRDS(here("data","VI_gene_clusters.rds"))
 
 # Load mouse and rat genes
-mm_core <- read_excel(here("data","pnas.2214888120.sd02.xlsx"), sheet = "Annotation- MM Core", range =cell_cols("G"))
-mm_rim <- read_excel(here("data","pnas.2214888120.sd02.xlsx"), sheet = "Annotation-MM Rim", range =cell_cols("G"))
-rat_core <- read_excel(here("data","pnas.2214888120.sd02.xlsx"), sheet = "Annotation Rat Core", range =cell_cols("G"))
-rat_rim <- read_excel(here("data","pnas.2214888120.sd02.xlsx"), sheet = "Annotation-Rat Rim", range =cell_cols("G"))
+mm_core <- read_excel(here("data","pnas.2214888120.sd02.xlsx"), sheet = "Annotation- MM Core", range =cell_cols("A"))
+mm_rim <- read_excel(here("data","pnas.2214888120.sd02.xlsx"), sheet = "Annotation-MM Rim", range =cell_cols("A"))
+rat_core <- read_excel(here("data","pnas.2214888120.sd02.xlsx"), sheet = "Annotation Rat Core", range =cell_cols("A"))
+rat_rim <- read_excel(here("data","pnas.2214888120.sd02.xlsx"), sheet = "Annotation-Rat Rim", range =cell_cols("A"))
 ```
 
 ### Convert Mouse and Rat Genes to HUman GEnes
 ```{r}
-# Load the function from the external file
-source(here("code","functions","convertGeneList.R")) 
+mm_core_homo <- getHomologs(unlist(as.vector(mm_core),use.names = F),species_from = "mus_musculus", species_to = "homo_sapiens")
+mm_rim_homo <- getHomologs(unlist(as.vector(mm_rim),use.names = F),species_from = "mus_musculus", species_to = "homo_sapiens")
+rat_core_homo <- getHomologs(unlist(as.vector(rat_core),use.names = F),species_from = "rattus_norvegicus", species_to = "homo_sapiens")
+rat_rim_homo <- getHomologs(unlist(as.vector(rat_rim),use.names = F),species_from = "rattus_norvegicus", species_to = "homo_sapiens")
+```
 
-# Convert a list of mouse genes to human genes
-mm_core_human <- convertGeneList(mm_core, from_species = "mouse", to_species = "human", verbose = TRUE)
 
-# Convert a list of rat genes to human genes
-ratGenes <- c("GeneA", "GeneB", "GeneC")
-convertGeneList(ratGenes, from_species = "rat", to_species = "human", verbose = TRUE)
+### Changing emsembl ids to gene symbols
+
+```{r eval=FALSE}
+gene_symbol_mm_core_homo <- mapIds(org.Hs.eg.db,
+       keys=mm_core_homo$hsapiens_homolog_ensembl_gene,
+       keytype="ENSEMBL",
+       column="SYMBOL")
+
+gene_symbol_mm_rim_homo <- mapIds(org.Hs.eg.db,
+       keys=mm_rim_homo$hsapiens_homolog_ensembl_gene,
+       keytype="ENSEMBL",
+       column="SYMBOL")
+
+gene_symbol_rat_core_homo <- mapIds(org.Hs.eg.db,
+       keys=rat_core_homo$hsapiens_homolog_ensembl_gene,
+       keytype="ENSEMBL",
+       column="SYMBOL")
+
+gene_symbol_rat_rim_homo <- mapIds(org.Hs.eg.db,
+       keys=rat_rim_homo$hsapiens_homolog_ensembl_gene,
+       keytype="ENSEMBL",
+       column="SYMBOL")
 
 ```
+
+### Gene-Membership Heatmap
+
+### Widen VI_cluster table
+```{r}
+# Ensure column names are correct
+VI_gene_cluster$Gene <- rownames(VI_gene_cluster)
+# Reshape into a wide format
+wide_df <- VI_gene_cluster %>%
+  group_by(Cluster) %>%
+  mutate(row = row_number()) %>%  # Create a row index for spreading
+  pivot_wider(names_from = Cluster, values_from = Gene) %>%
+  select(-row)  # Remove the helper column
+
+# Replace NA values with empty strings
+wide_df[is.na(wide_df)] <- ""
+
+# View the widened table
+print(wide_df)
+
+```
+
+### Heatmap
+```{r}
+# Define your clusters (each is a vector of gene names)
+cluster1 <- wide_df$"1"
+cluster2 <- wide_df$"2"
+cluster3 <- wide_df$"3"
+cluster4 <- wide_df$"4"
+
+# Define your gene sets
+gene_set1 <- unlist(gene_symbol_mm_core_homo,use.names = FALSE)
+gene_set2 <- unlist(gene_symbol_mm_rim_homo,use.names = FALSE)
+gene_set3 <- unlist(gene_symbol_rat_core_homo,use.names = FALSE)
+gene_set4 <- unlist(gene_symbol_rat_rim_homo,use.names = FALSE)
+
+# Combine clusters and gene sets into lists for easier processing
+clusters <- list(Cluster1 = cluster1,
+                 Cluster2 = cluster2,
+                 Cluster3 = cluster3,
+                 Cluster4 = cluster4)
+
+gene_sets <- list(mm_core = gene_set1,
+                  mm_rim = gene_set2,
+                  rat_core = gene_set3,
+                  rat_rim = gene_set4)
+
+# Initialize a matrix to hold the overlap counts:
+overlap_matrix <- matrix(0, nrow = length(clusters), ncol = length(gene_sets),
+                         dimnames = list(names(clusters), names(gene_sets)))
+
+# Calculate the number of overlapping genes for each cluster and gene set pair:
+for (i in seq_along(clusters)) {
+  for (j in seq_along(gene_sets)) {
+    overlap_matrix[i, j] <- length(intersect(clusters[[i]], gene_sets[[j]]))
+  }
+}
+
+# Print the matrix to see the raw overlap counts:
+print(overlap_matrix)
+
+# Plot the heatmap:
+pheatmap(overlap_matrix,
+         cluster_rows = FALSE,  # keep the rows in defined order
+         cluster_cols = FALSE,  # keep the columns in defined order
+         display_numbers = TRUE,
+         main = "Overlap of Clusters with Gene Sets")
+
+# Generate heatmap using ComplexHeatmap
+# Heatmap(overlap_matrix,
+#         name = "Overlap Count",
+#         col = colorRamp2(c(0, max(overlap_matrix)), c("white", "blue")),
+#         row_names_gp = gpar(fontsize = 12),
+#         column_names_gp = gpar(fontsize = 12),
+#         heatmap_legend_param = list(title = "Gene Overlap"),
+#         cluster_rows = FALSE,
+#         cluster_columns = FALSE)
+
+```
+

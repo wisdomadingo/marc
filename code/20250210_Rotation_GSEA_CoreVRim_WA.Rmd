@@ -1,0 +1,370 @@
+---
+title: "20250208_Lab_Rotation"
+output: html_document
+date: "2025-02-09"
+author: "wisdom"
+---
+
+### 1. Install and Load Required Packages
+```{r}
+if (!requireNamespace("BiocManager", quietly = TRUE))
+    install.packages("BiocManager")
+BiocManager::install(version = "3.20")
+
+BiocManager::install(c("clusterProfiler", "org.Hs.eg.db", "org.Mm.eg.db", "org.Rn.eg.db")) # For human genes
+
+# install readxl
+install.packages("readxl")
+
+# Install here
+install.packages("here")
+
+# Install Gitcredits
+install.packages("gitcreds")
+```
+Load Libraries
+```{r}
+library(clusterProfiler)
+library(org.Hs.eg.db)  # Replace with your organism-specific database if needed
+library(DOSE)  # Optional, for additional visualization
+library(tidyr)
+library(readxl)
+library(here)
+library(gitcreds)
+library(org.Hs.eg.db)
+library(org.Mm.eg.db)
+library(org.Rn.eg.db)
+```
+
+### 2. Prepare ranked gene list
+
+#### 2.1 Load differerially genes  between **core** and **rim** in **mouse** and **rat**. Supporting Dataset S01<https://www.pnas.org/doi/suppl/10.1073/pnas.2214888120/suppl_file/pnas.2214888120.sd01.xlsx> from paper <https://www.pnas.org/doi/10.1073/pnas.2214888120>
+```{r}
+# Load mouse and rat genes
+mm_core_vs_rim <- read_excel(here("data","pnas.2214888120.sd01.xlsx"), sheet = "TPM_Core-vs-rim_mm", range =cell_cols(c("A","I")))
+rat_core_vs_rim <- read_excel(here("data","pnas.2214888120.sd01.xlsx"), sheet = "TPM_Core-vs-rim_rn", range =cell_cols(c("A","I")))
+```
+
+#### 2.2 Rank gene list
+```{r}
+mm_core_vs_rim <- mm_core_vs_rim[order(mm_core_vs_rim$logFC, decreasing = TRUE), ]
+rat_core_vs_rim <- rat_core_vs_rim[order(rat_core_vs_rim$logFC, decreasing = TRUE), ]
+```
+
+
+```{r}
+ENTREZID <- bitr(mm_core_vs_rim$external_gene_name, fromType = "SYMBOL", toType = "ENTREZID", OrgDb = org.Mm.eg.db)
+
+mm_core_vs_rim_vector <- sort(setNames(mm_core_vs_rim$logFC, mm_core_vs_rim$ensembl_gene_id), decreasing = TRUE)
+rat_core_vs_rim_vector <- sort(setNames(rat_core_vs_rim$logFC, rat_core_vs_rim$ensembl_gene_id), decreasing = TRUE)
+```
+
+### 3 Prepare ranked genes with both fc and pval
+```{r}
+mm_core_vs_rim_vector_p <- sign(mm_core_vs_rim$logFC)*(-log10(mm_core_vs_rim$P.Value)) # we will use the signed p values from spatial DGE as ranking
+names(mm_core_vs_rim_vector_p) <- mm_core_vs_rim$ensembl_gene_id # genes as names#
+mm_core_vs_rim_vector_p <- sort(mm_core_vs_rim_vector_p, decreasing = TRUE) # sort genes by ranking
+
+rat_core_vs_rim_vector_p <- sign(rat_core_vs_rim$logFC)*(-log10(rat_core_vs_rim$P.Value)) # we will use the signed p values from spatial DGE as ranking
+names(rat_core_vs_rim_vector_p) <- rat_core_vs_rim$ensembl_gene_id # genes as names#
+rat_core_vs_rim_vector_p <- sort(rat_core_vs_rim_vector_p, decreasing = TRUE) # sort genes by ranking
+
+```
+
+### 4 Prepare ranked genes with t statistic
+```{r}
+mm_core_vs_rim_vector_t <- sort(setNames(mm_core_vs_rim$t, mm_core_vs_rim$ensembl_gene_id), decreasing = TRUE)
+rat_core_vs_rim_vector_t <- sort(setNames(rat_core_vs_rim$t, rat_core_vs_rim$ensembl_gene_id), decreasing = TRUE)
+```
+
+### 3. Prepare VI clusters as genesets
+
+#### 3.1 Load VI clusters 
+```{r}
+# Load VI gene clusters
+VI_gene_cluster <- readRDS(here("data","VI_gene_clusters.rds"))
+```
+
+```{r}
+VI_gene_cluster$gene_symbol <- rownames(VI_gene_cluster)
+```
+
+
+### Widen VI_cluster table
+```{r}
+# Ensure column names are correct
+VI_gene_cluster$Gene <- rownames(VI_gene_cluster)
+# Reshape into a wide format
+wide_df <- VI_gene_cluster %>%
+  group_by(Cluster) %>%
+  mutate(row = row_number()) %>%  # Create a row index for spreading
+  pivot_wider(names_from = Cluster, values_from = Gene) %>%
+  dplyr::select(-row)  # Remove the helper column
+
+# Replace NA values with empty strings
+# wide_df[is.na(wide_df)] <- ""
+
+drop_na(wide_df)
+# View the widened table
+print(wide_df)
+```
+
+
+#### 3.2 Convert Gene symbolls to Entrez IDs
+```{r}
+library("AnnotationDbi")
+library("org.Hs.eg.db")
+VI_gene_cluster$ensemblID = mapIds(org.Hs.eg.db,
+                    keys=VI_gene_cluster$gene_symbol, 
+                    column="ENSEMBL",
+                    keytype="SYMBOL",
+                    multiVals="first")
+
+#Manual Annotation
+VI_gene_cluster[VI_gene_cluster$gene_symbol == "IGHV3.73","ensemblID"] <- "ENSG00000211976"
+VI_gene_cluster[VI_gene_cluster$gene_symbol == "DGCR5.1","ensemblID"] <-  "ENSG00000273032"
+VI_gene_cluster[VI_gene_cluster$gene_symbol == "ARNTL2","ensemblID"] <- "ENSG00000029153"
+VI_gene_cluster[VI_gene_cluster$gene_symbol == "WT1.AS","ensemblID"] <- "ENSG00000183242"
+VI_gene_cluster[VI_gene_cluster$gene_symbol == "H1.5","ensemblID"] <- "ENSG00000184357"
+VI_gene_cluster[VI_gene_cluster$gene_symbol == "CASTOR3","ensemblID"] <- "ENSG00000239521"
+VI_gene_cluster[VI_gene_cluster$gene_symbol == "GAPDHP1","ensemblID"] <- "ENSG00000228232"
+VI_gene_cluster[VI_gene_cluster$gene_symbol == "AC010329.5","ensemblID"] <- "ENSG00000280171"
+VI_gene_cluster[VI_gene_cluster$gene_symbol == "MIR29B2CHG","ensemblID"] <- "ENSG00000203709"
+VI_gene_cluster[VI_gene_cluster$gene_symbol == "AC012651.1","ensemblID"] <- "ENSG00000258461" 
+VI_gene_cluster[VI_gene_cluster$gene_symbol == "AL663070.1","ensemblID"] <- "ENSG00000168389"
+
+# Rename Clusters
+VI_gene_cluster[VI_gene_cluster$Cluster == "1","Cluster"] <- "Cluster1"
+VI_gene_cluster[VI_gene_cluster$Cluster == "2","Cluster"] <- "Cluster2"
+VI_gene_cluster[VI_gene_cluster$Cluster == "3","Cluster"] <- "Cluster3"
+VI_gene_cluster[VI_gene_cluster$Cluster == "4","Cluster"] <- "Cluster4"
+
+
+cluster2_ensembl = mapIds(org.Hs.eg.db,
+                    keys=VI_gene_cluster$gene_symbol, 
+                    column="ENSEMBL",
+                    keytype="SYMBOL",
+                    multiVals="first")
+
+cluster3_ensembl = mapIds(org.Hs.eg.db,
+                    keys=wide_df$"3", 
+                    column="ENSEMBL",
+                    keytype="SYMBOL",
+                    multiVals="first")
+
+cluster4_ensembl = mapIds(org.Hs.eg.db,
+                    keys=wide_df$"4", 
+                    column="ENSEMBL",
+                    keytype="SYMBOL",
+                    multiVals="first")
+```
+
+
+#### 3.2 Convert Gene symbolls to Entrez IDs
+```{r}
+library("AnnotationDbi")
+library("org.Hs.eg.db")
+cluster1_ensembl = mapIds(org.Hs.eg.db,
+                    keys=wide_df$"1", 
+                    column="ENSEMBL",
+                    keytype="SYMBOL",
+                    multiVals="first")
+
+cluster2_ensembl = mapIds(org.Hs.eg.db,
+                    keys=wide_df$"2", 
+                    column="ENSEMBL",
+                    keytype="SYMBOL",
+                    multiVals="first")
+
+cluster3_ensembl = mapIds(org.Hs.eg.db,
+                    keys=wide_df$"3", 
+                    column="ENSEMBL",
+                    keytype="SYMBOL",
+                    multiVals="first")
+
+cluster4_ensembl = mapIds(org.Hs.eg.db,
+                    keys=wide_df$"4", 
+                    column="ENSEMBL",
+                    keytype="SYMBOL",
+                    multiVals="first")
+```
+
+
+#### 3.2 Convert VI clusters from human genes to mouse and rat orthologs
+```{r}
+mm_geneset_cluster1 <- getHomologs(unlist(cluster1_ensembl,use.names = FALSE), species_from = "homo_sapiens", species_to = "mus_musculus" )
+mm_geneset_cluster2 <- getHomologs(unlist(cluster2_ensembl,use.names = FALSE), species_from = "homo_sapiens", species_to = "mus_musculus" )
+mm_geneset_cluster3 <- getHomologs(unlist(cluster3_ensembl,use.names = FALSE), species_from = "homo_sapiens", species_to = "mus_musculus" )
+mm_geneset_cluster4 <- getHomologs(unlist(cluster4_ensembl,use.names = FALSE), species_from = "homo_sapiens", species_to = "mus_musculus" )
+
+rat_geneset_cluster1 <- getHomologs(unlist(cluster1_ensembl,use.names = FALSE), species_from = "homo_sapiens", species_to = "rattus_norvegicus" )
+rat_geneset_cluster2 <- getHomologs(unlist(cluster2_ensembl,use.names = FALSE), species_from = "homo_sapiens", species_to = "rattus_norvegicus" )
+rat_geneset_cluster3 <- getHomologs(unlist(cluster3_ensembl,use.names = FALSE), species_from = "homo_sapiens", species_to = "rattus_norvegicus" )
+rat_geneset_cluster4 <- getHomologs(unlist(cluster4_ensembl,use.names = FALSE), species_from = "homo_sapiens", species_to = "rattus_norvegicus" )
+```
+
+#### 3.2 Convert VI clusters from human genes to mouse and rat orthologs
+```{r}
+mm_geneset_cluster1 <- getHomologs(VI_gene_cluster$ensemblID, species_from = "homo_sapiens", species_to = "mus_musculus" )
+mm_geneset_cluster2 <- getHomologs(unlist(cluster2_ensembl,use.names = FALSE), species_from = "homo_sapiens", species_to = "mus_musculus" )
+mm_geneset_cluster3 <- getHomologs(unlist(cluster3_ensembl,use.names = FALSE), species_from = "homo_sapiens", species_to = "mus_musculus" )
+mm_geneset_cluster4 <- getHomologs(unlist(cluster4_ensembl,use.names = FALSE), species_from = "homo_sapiens", species_to = "mus_musculus" )
+
+
+rat_geneset_cluster1 <- getHomologs(VI_gene_cluster$ensemblID, species_from = "homo_sapiens", species_to = "rattus_norvegicus" )
+rat_geneset_cluster1 <- getHomologs(unlist(cluster1_ensembl,use.names = FALSE), species_from = "homo_sapiens", species_to = "rattus_norvegicus" )
+rat_geneset_cluster2 <- getHomologs(unlist(cluster2_ensembl,use.names = FALSE), species_from = "homo_sapiens", species_to = "rattus_norvegicus" )
+rat_geneset_cluster3 <- getHomologs(unlist(cluster3_ensembl,use.names = FALSE), species_from = "homo_sapiens", species_to = "rattus_norvegicus" )
+rat_geneset_cluster4 <- getHomologs(unlist(cluster4_ensembl,use.names = FALSE), species_from = "homo_sapiens", species_to = "rattus_norvegicus" )
+```
+
+
+```{r}
+colnames(mm_geneset_cluster1)[1] <- "ensemblID" 
+colnames(rat_geneset_cluster1)[1] <- "ensemblID" 
+mouse_geneset <- merge(VI_gene_cluster,mm_geneset_cluster1, by="ensemblID")
+rat_geneset <- merge(VI_gene_cluster,rat_geneset_cluster1, by="ensemblID")
+#Remove extra columns
+mouse_geneset$ensemblID <- NULL
+mouse_geneset$gene_symbol <- NULL
+rat_geneset$ensemblID <- NULL
+rat_geneset$gene_symbol <- NULL
+#Rename cloumns
+colnames(mouse_geneset)[1] <- "TermID" 
+colnames(mouse_geneset)[2] <- "geneID"
+colnames(rat_geneset)[1] <- "TermID" 
+colnames(rat_geneset)[2] <- "geneID"
+```
+
+
+
+```{r}
+mm_geneset <- data.frame(
+                cluster1 = mm_geneset_cluster1$mmusculus_homolog_ensembl_gene,
+                cluster2 = mm_geneset_cluster2$mmusculus_homolog_ensembl_gene,
+                cluster3 = mm_geneset_cluster3$mmusculus_homolog_ensembl_gene,
+                cluster4 = mm_geneset_cluster4$mmusculus_homolog_ensembl_gene
+                )
+
+rat_geneset <- list(cluster1=rat_geneset_cluster1$rnorvegicus_homolog_ensembl_gene,
+                 cluster2=rat_geneset_cluster2$rnorvegicus_homolog_ensembl_gene,
+                 cluster3=rat_geneset_cluster3$rnorvegicus_homolog_ensembl_gene,
+                 cluster4=rat_geneset_cluster4$rnorvegicus_homolog_ensembl_gene)
+```
+
+```{r}
+mm_geneset <- data.frame(
+                TermID = c("")
+                )
+
+rat_geneset <- list(cluster1=rat_geneset_cluster1$rnorvegicus_homolog_ensembl_gene,
+                 cluster2=rat_geneset_cluster2$rnorvegicus_homolog_ensembl_gene,
+                 cluster3=rat_geneset_cluster3$rnorvegicus_homolog_ensembl_gene,
+                 cluster4=rat_geneset_cluster4$rnorvegicus_homolog_ensembl_gene)
+```
+
+```{r}
+max_length <- max(
+  length(mm_geneset_cluster1$mmusculus_homolog_ensembl_gene),
+  length(mm_geneset_cluster2$mmusculus_homolog_ensembl_gene),
+  length(mm_geneset_cluster3$mmusculus_homolog_ensembl_gene),
+  length(mm_geneset_cluster4$mmusculus_homolog_ensembl_gene)
+)
+
+mm_geneset <- data.frame(
+  cluster1 = c(mm_geneset_cluster1$mmusculus_homolog_ensembl_gene, rep(NA, max_length - length(mm_geneset_cluster1$mmusculus_homolog_ensembl_gene))),
+  cluster2 = c(mm_geneset_cluster2$mmusculus_homolog_ensembl_gene, rep(NA, max_length - length(mm_geneset_cluster2$mmusculus_homolog_ensembl_gene))),
+  cluster3 = c(mm_geneset_cluster3$mmusculus_homolog_ensembl_gene, rep(NA, max_length - length(mm_geneset_cluster3$mmusculus_homolog_ensembl_gene))),
+  cluster4 = c(mm_geneset_cluster4$mmusculus_homolog_ensembl_gene, rep(NA, max_length - length(mm_geneset_cluster4$mmusculus_homolog_ensembl_gene)))
+)
+```
+
+
+### 4. Perform GSEA
+```{r}
+gsea_results_mouse <- GSEA(mm_core_vs_rim_vector, TERM2GENE = mouse_geneset, eps= 1e-300)
+gsea_results_rat <- GSEA(rat_core_vs_rim_vector, TERM2GENE = rat_geneset, eps= 1e-300)
+```
+
+```{r}
+gsea_results_mouse_t <- GSEA(mm_core_vs_rim_vector_t, TERM2GENE = mouse_geneset, eps= 1e-300)
+gsea_results_rat_t <- GSEA(rat_core_vs_rim_vector_t, TERM2GENE = rat_geneset, eps= 1e-300)
+```
+
+```{r}
+gsea_results_mouse_p <- GSEA(mm_core_vs_rim_vector_p, TERM2GENE = mouse_geneset, eps= 1e-300)
+gsea_results_rat_p <- GSEA(rat_core_vs_rim_vector_p, TERM2GENE = rat_geneset, eps= 1e-300)
+```
+
+
+
+```{r}
+
+enricher_result_mouse <- enricher(gene = names(mm_core_vs_rim_vector), TERM2GENE = mouse_geneset)
+enricher_result_rat <- enricher(gene = names(rat_core_vs_rim_vector), TERM2GENE = rat_geneset)
+```
+
+
+```{r}
+as.data.frame(gsea_results_mouse)
+```
+```{r}
+as.data.frame(gsea_results_mouse_t)
+```
+```{r}
+as.data.frame(gsea_results_mouse_p)
+```
+
+```{r}
+as.data.frame(gsea_results_rat)
+```
+
+```{r}
+as.data.frame(gsea_results_rat_t)
+```
+
+```{r}
+as.data.frame(gsea_results_rat_p)
+```
+
+```{r}
+mouse_cluster1_plot <- gseaplot(gsea_results_mouse_p, geneSetID = "Cluster1", title = "Mouse-Cluster1")
+mouse_cluster1_plot
+```
+```{r}
+mouse_cluster2_plot <- gseaplot(gsea_results_mouse_p, geneSetID = "Cluster2", title = "Mouse-Cluster2")
+mouse_cluster2_plot
+```
+
+```{r}
+mouse_cluster3_plot <- gseaplot(gsea_results_mouse_p, geneSetID = "Cluster3", title = "Mouse-Cluster3")
+mouse_cluster3_plot
+```
+
+
+```{r}
+mouse_cluster4_plot <- gseaplot(gsea_results_mouse_p, geneSetID = "Cluster4", title = "Mouse-Cluster4")
+mouse_cluster4_plot
+```
+
+
+
+```{r}
+rat_cluster1_plot <- gseaplot(gsea_results_rat_p, geneSetID = "Cluster1", title = "Rat-Cluster1")
+rat_cluster1_plot
+```
+
+```{r}
+rat_cluster2_plot <- gseaplot(gsea_results_rat_p, geneSetID = "Cluster2", title = "Rat-Cluster2")
+rat_cluster2_plot
+```
+
+```{r}
+rat_cluster3_plot <- gseaplot(gsea_results_rat_p, geneSetID = "Cluster3", title = "Rat-Cluster3")
+rat_cluster3_plot
+```
+
+```{r}
+rat_cluster4_plot <- gseaplot(gsea_results_rat_p, geneSetID = "Cluster4", title = "Rat-Cluster4")
+rat_cluster4_plot
+```

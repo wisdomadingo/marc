@@ -78,7 +78,7 @@ rat_rim_homo <- getHomologs(unlist(as.vector(rat_rim),use.names = F),species_fro
 
 ### Changing emsembl ids to gene symbols
 
-```{r eval=FALSE}
+```{r}
 gene_symbol_mm_core_homo <- mapIds(org.Hs.eg.db,
        keys=mm_core_homo$hsapiens_homolog_ensembl_gene,
        keytype="ENSEMBL",
@@ -112,7 +112,7 @@ wide_df <- VI_gene_cluster %>%
   group_by(Cluster) %>%
   mutate(row = row_number()) %>%  # Create a row index for spreading
   pivot_wider(names_from = Cluster, values_from = Gene) %>%
-  select(-row)  # Remove the helper column
+  dplyr::select(-row)  # Remove the helper column
 
 # Replace NA values with empty strings
 wide_df[is.na(wide_df)] <- ""
@@ -151,15 +151,40 @@ gene_sets <- list(mm_core = gene_set1,
 overlap_matrix <- matrix(0, nrow = length(clusters), ncol = length(gene_sets),
                          dimnames = list(names(clusters), names(gene_sets)))
 
+# Initialize a data frame to store overlapping genes
+overlap_table <- data.frame(Cluster = character(),
+                            GeneSet = character(),
+                            Overlapping_Genes = character(),
+                            stringsAsFactors = FALSE)
+
 # Calculate the number of overlapping genes for each cluster and gene set pair:
 for (i in seq_along(clusters)) {
   for (j in seq_along(gene_sets)) {
-    overlap_matrix[i, j] <- length(intersect(clusters[[i]], gene_sets[[j]]))
+    # Identify overlapping genes
+    common_genes <- intersect(clusters[[i]], gene_sets[[j]])
+    
+    # Store the overlap count in the matrix
+    overlap_matrix[i, j] <- length(common_genes)
+    
+    # Store overlapping genes in the table (if any exist)
+    if (length(common_genes) > 0) {
+      overlap_table <- rbind(overlap_table, data.frame(
+        Cluster = names(clusters)[i],
+        GeneSet = names(gene_sets)[j],
+        Overlapping_Genes = paste(common_genes, collapse = ", ")
+      ))
+    }
   }
 }
 
-# Print the matrix to see the raw overlap counts:
+# Print the matrix to see the raw overlap counts
 print(overlap_matrix)
+
+# Save the overlap table as CSV (optional)
+write.csv(overlap_table, "overlapping_genes_table.csv", row.names = FALSE)
+
+# Print the table of overlapping genes
+print(overlap_table)
 
 # Plot the heatmap:
 pheatmap(overlap_matrix,

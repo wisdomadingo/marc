@@ -10,23 +10,15 @@ author: "wisdom"
 if (!requireNamespace("BiocManager", quietly = TRUE))
     install.packages("BiocManager")
 BiocManager::install(version = "3.20")
-
-BiocManager::install(c("clusterProfiler", "org.Hs.eg.db", "org.Mm.eg.db", "org.Rn.eg.db")) # For human genes
-
-# install readxl
+BiocManager::install(c("clusterProfiler", "org.Hs.eg.db", "org.Mm.eg.db", "org.Rn.eg.db")) 
 install.packages("readxl")
-
-# Install here
 install.packages("here")
-
-# Install Gitcredits
 install.packages("gitcreds")
+install.packages("gridExtra")
 ```
 Load Libraries
 ```{r}
 library(clusterProfiler)
-library(org.Hs.eg.db)  # Replace with your organism-specific database if needed
-library(DOSE)  # Optional, for additional visualization
 library(tidyr)
 library(readxl)
 library(here)
@@ -34,6 +26,7 @@ library(gitcreds)
 library(org.Hs.eg.db)
 library(org.Mm.eg.db)
 library(org.Rn.eg.db)
+library(gridExtra)
 ```
 
 ### 2. Prepare ranked gene list

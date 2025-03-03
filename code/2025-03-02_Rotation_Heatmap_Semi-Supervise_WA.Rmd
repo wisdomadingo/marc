@@ -1,0 +1,436 @@
+---
+title: "2025-03-02_Rotation_Heatmap_Semi-Supervise_WA"
+author: "wisdom"
+date: "2025-03-03"
+output: html_document
+---
+
+### 1. Install and Load Required Packages
+```{r}
+if (!requireNamespace("BiocManager", quietly = TRUE))
+    install.packages("BiocManager")
+BiocManager::install(version = "3.20")
+BiocManager::install(c("org.Hs.eg.db", "org.Mm.eg.db", "org.Rn.eg.db"))
+install.packages("readxl")
+install.packages("here")
+install.packages("gitcreds")
+install.packages("biomaRt")
+install.packages("cowplot")
+install.packages("pheatmap")
+install.packages("RColorBrewer")
+```
+
+### Load Libraries
+```{r}
+library(tidyr)
+library(readxl)
+library(here)
+library(gitcreds)
+library(org.Hs.eg.db)
+library(org.Mm.eg.db)
+library(org.Rn.eg.db)
+library(biomaRt)
+library(pheatmap)
+library(RColorBrewer)
+library(dplyr)
+source('/Users/wisdom/Documents/BU/Lab Rotations/Lenburg Lab/Rotation/code/functions/Semipheatmap.R')
+```
+
+### 2. Prepare ranked gene list
+
+#### 2.1 Load differerially genes  between **core** and **rim** in **mouse** and **rat** after ANGPL7 knockdown. Supporting Dataset S03<https://www.pnas.org/doi/suppl/10.1073/pnas.2214888120/suppl_file/pnas.2214888120.sd03.xlsx> from paper <https://www.pnas.org/doi/10.1073/pnas.2214888120>
+```{r}
+# Load mouse and rat genes
+mm_core_KDvsNT4 <- read_excel(here("data","pnas.2214888120.sd03.xlsx"), sheet = "TPM_mm_core_KDvsNT4")
+rn_core_KDvsNT4 <- read_excel(here("data","pnas.2214888120.sd03.xlsx"), sheet = "TPM_rn_coreKDvsNT4")
+mm_rim_KDvsNT4 <- read_excel(here("data","pnas.2214888120.sd03.xlsx"), sheet = "TPM_mm_rim-KDNT4")
+rn_rim_KDvsNT4 <- read_excel(here("data","pnas.2214888120.sd03.xlsx"), sheet = "TPM_rn_rim-KDvsNT4")
+```
+
+### Remove unecessary columns
+```{r}
+remove_col <- c("external_gene_name","logFC","t","Length","AveExpr","P.Value","B","adj.P.Val","ensembl_gene_id")
+
+mm_core_KDvsNT4_r <- select(mm_core_KDvsNT4,-c(remove_col))
+rownames(mm_core_KDvsNT4_r) <- mm_core_KDvsNT4$ensembl_gene_id
+mm_core_KDvsNT4_mat <- as.matrix(mm_core_KDvsNT4_r)
+
+rn_core_KDvsNT4_r <- select(rn_core_KDvsNT4,-c(remove_col))
+rownames(rn_core_KDvsNT4_r) <- rn_core_KDvsNT4$ensembl_gene_id
+rn_core_KDvsNT4_mat <- as.matrix(rn_core_KDvsNT4_r)
+
+mm_rim_KDvsNT4_r <- select(mm_rim_KDvsNT4,-c(remove_col))
+rownames(mm_rim_KDvsNT4_r) <- mm_rim_KDvsNT4$ensembl_gene_id
+mm_rim_KDvsNT4_mat <- as.matrix(mm_rim_KDvsNT4_r)
+
+rn_rim_KDvsNT4_r <- select(rn_rim_KDvsNT4,-c(remove_col))
+rownames(rn_rim_KDvsNT4_r) <- rn_rim_KDvsNT4$ensembl_gene_id
+rn_rim_KDvsNT4_mat <- as.matrix(rn_rim_KDvsNT4_r)
+```
+
+
+### 3. Prepare VI clusters as genesets
+
+#### 3.1 Load VI clusters 
+```{r}
+# Load VI gene clusters
+VI_gene_cluster <- readRDS(here("data","VI_gene_clusters.rds"))
+```
+
+```{r}
+VI_gene_cluster$gene_symbol <- rownames(VI_gene_cluster)
+```
+
+#### 3.2 Convert Gene symbolls to Entrez IDs
+```{r}
+library("AnnotationDbi")
+library("org.Hs.eg.db")
+VI_gene_cluster$ensemblID = mapIds(org.Hs.eg.db,
+                    keys=VI_gene_cluster$gene_symbol, 
+                    column="ENSEMBL",
+                    keytype="SYMBOL",
+                    multiVals="first")
+
+#Manual Annotation
+VI_gene_cluster[VI_gene_cluster$gene_symbol == "IGHV3.73","ensemblID"] <- "ENSG00000211976"
+VI_gene_cluster[VI_gene_cluster$gene_symbol == "DGCR5.1","ensemblID"] <-  "ENSG00000273032"
+VI_gene_cluster[VI_gene_cluster$gene_symbol == "ARNTL2","ensemblID"] <- "ENSG00000029153"
+VI_gene_cluster[VI_gene_cluster$gene_symbol == "WT1.AS","ensemblID"] <- "ENSG00000183242"
+VI_gene_cluster[VI_gene_cluster$gene_symbol == "H1.5","ensemblID"] <- "ENSG00000184357"
+VI_gene_cluster[VI_gene_cluster$gene_symbol == "CASTOR3","ensemblID"] <- "ENSG00000239521"
+VI_gene_cluster[VI_gene_cluster$gene_symbol == "GAPDHP1","ensemblID"] <- "ENSG00000228232"
+VI_gene_cluster[VI_gene_cluster$gene_symbol == "AC010329.5","ensemblID"] <- "ENSG00000280171"
+VI_gene_cluster[VI_gene_cluster$gene_symbol == "MIR29B2CHG","ensemblID"] <- "ENSG00000203709"
+VI_gene_cluster[VI_gene_cluster$gene_symbol == "AC012651.1","ensemblID"] <- "ENSG00000258461" 
+VI_gene_cluster[VI_gene_cluster$gene_symbol == "AL663070.1","ensemblID"] <- "ENSG00000168389"
+
+# Rename Clusters
+VI_gene_cluster[VI_gene_cluster$Cluster == "1","Cluster"] <- "Cluster1"
+VI_gene_cluster[VI_gene_cluster$Cluster == "2","Cluster"] <- "Cluster2"
+VI_gene_cluster[VI_gene_cluster$Cluster == "3","Cluster"] <- "Cluster3"
+VI_gene_cluster[VI_gene_cluster$Cluster == "4","Cluster"] <- "Cluster4"
+```
+
+
+#### 3.2 Convert VI clusters from human genes to mouse and rat orthologs
+```{r}
+mm_geneset_cluster1 <- getHomologs(VI_gene_cluster$ensemblID, species_from = "homo_sapiens", species_to = "mus_musculus" )
+
+
+rat_geneset_cluster1 <- getHomologs(VI_gene_cluster$ensemblID, species_from = "homo_sapiens", species_to = "rattus_norvegicus" )
+```
+
+
+```{r}
+colnames(mm_geneset_cluster1)[1] <- "ensemblID" 
+colnames(rat_geneset_cluster1)[1] <- "ensemblID" 
+mouse_geneset <- merge(VI_gene_cluster,mm_geneset_cluster1, by="ensemblID")
+rat_geneset <- merge(VI_gene_cluster,rat_geneset_cluster1, by="ensemblID")
+```
+
+```{r}
+Run_heatmap_mm <- function(samples_matrix) {
+  
+
+### Subsetting only genes that are available in the VI clusters
+
+modMat <- samples_matrix[rownames(samples_matrix) %in% c(mouse_geneset$mmusculus_homolog_ensembl_gene),]
+
+
+### Row scale the count matrix to be plotted
+
+# Transposed to make genes column as scaling works on column
+mod_scale <- t(scale(t(modMat),center=T,scale=T))
+
+
+### Create row annotation
+
+VI_cluster_common_genes <- mouse_geneset[match(rownames(mod_scale),mouse_geneset$mmusculus_homolog_ensembl_gene),]
+
+
+### Create row annotation dataframe
+
+ann_row <- data.frame(Cluster=as.factor(VI_cluster_common_genes$Cluster))
+
+
+### Make rownames of row annotation data frame the name of the genes (or the names of the rows for the object you're plotting)
+
+rownames(ann_row) <- VI_cluster_common_genes$mmusculus_homolog_ensembl_gene
+ann_row <- ann_row[match(rownames(mod_scale),rownames(ann_row)),,drop=FALSE]
+
+
+### Make color annotations
+
+#For example, I picked these colors for the biological clusters
+hcl.colors(n=8, palette = "Spectral")
+
+colors.ann = list(
+                   Cluster=c("Cluster1"="#A71B4B", "Cluster2"="#F6AD3E", "Cluster3"="blue", "Cluster4"="green"))
+
+#You can change this based on how you want the colors to scale
+breaksList = seq(-2, 2, by = .2)
+
+####Plot####
+#I always use the euclidean distance and ward.D2 but there are other methods, too
+#Don't use the built in pheatmap scale option!
+pheatmap(mod_scale, show_rownames = F, show_colnames = T, 
+         cluster_rows = T, cluster_cols = T, 
+         scale = "none",
+         #I always manually scale my values and don't use this scale option. This makes it easier to find the samples in the heirarchical clusters
+         #Row scale: mod_scale <- t(scale(t(counts),center=T,scale=T))
+         #Column scale: mod_scale <- scale(counts,center=T,scale=T)
+         color = colorRampPalette(rev(brewer.pal(n = 10, name = "RdBu")))(length(breaksList)), # Defines the vector of colors for the legend (it has to be of the same lenght of breaksList)
+         breaks = breaksList, 
+         annotation_colors = colors.ann,
+         annotation_row = ann_row,
+         fontsize = 9,
+         clustering_method = "ward.D2")
+
+##Clustering for rows 
+d <- dist(mod_scale, method = "euclidean") #Just make sure this matches with your pheatmap code
+hc1 <- hclust(d, method = "ward.D2" ) #Just make sure this matches with your pheatmap code
+#Clustering
+sub_grp <- cutree(hc1, k = 4)
+#Making sub grp a DF
+df_clusters <- as.data.frame(sub_grp)
+
+#You can align these to your column annotations, and then since you have the names of the samples in each cluster, you can store that info and use elsewhere
+df_clusters <- df_clusters[match(rownames(mod_scale),rownames(df_clusters)),,drop=FALSE]
+
+#Add cluster variable to column annotations
+ann_row$H_Cluster <- as.factor(df_clusters$sub_grp)
+#Add color options for these clusters
+colors.ann$H_Cluster <- c("1"="#E3DEEE", "2"="#DB6AC0", "3"="#611300", "4"="#B87AEF")
+
+#Since you didn't use the built in heatmap scaling option, these should align perfectly with clusters on the dendrogram
+pheatmap(mod_scale, show_rownames = F, show_colnames = T, 
+         cluster_rows = T, cluster_cols = T, 
+         scale = "none",
+         color = colorRampPalette(rev(brewer.pal(n = 10, name = "RdBu")))(length(breaksList)), # Defines the vector of colors for the legend (it has to be of the same lenght of breaksList)
+         breaks = breaksList, 
+         annotation_colors = colors.ann,
+         annotation_row = ann_row,
+         fontsize = 9,
+         clustering_method = "ward.D2")
+}
+```
+
+
+```{r}
+Run_heatmap_rn <- function(samples_matrix) {
+  
+
+### Subsetting only genes that are available in the VI clusters
+
+modMat <- rn_rim_KDvsNT4_mat[rownames(rn_rim_KDvsNT4_mat) %in% c(rat_geneset$rnorvevicus_homolog_ensembl_gene),]
+
+
+### Row scale the count matrix to be plotted
+
+# Transposed to make genes column as scaling works on column
+mod_scale <- t(scale(t(modMat),center=T,scale=T))
+
+
+### Create row annotation
+
+VI_cluster_common_genes <- mouse_geneset[match(rownames(mod_scale),rat_geneset$rnorvevicus_homolog_ensembl_gene),]
+
+
+### Create row annotation dataframe
+
+ann_row <- data.frame(Cluster=as.factor(VI_cluster_common_genes$Cluster))
+
+
+### Make rownames of row annotation data frame the name of the genes (or the names of the rows for the object you're plotting)
+
+rownames(ann_row) <- VI_cluster_common_genes$rnorvevicus_homolog_ensembl_gene
+ann_row <- ann_row[match(rownames(mod_scale),rownames(ann_row)),,drop=FALSE]
+
+
+### Make color annotations
+
+#For example, I picked these colors for the biological clusters
+hcl.colors(n=8, palette = "Spectral")
+
+colors.ann = list(
+                   Cluster=c("Cluster1"="#A71B4B", "Cluster2"="#F6AD3E", "Cluster3"="blue", "Cluster4"="green"))
+
+#You can change this based on how you want the colors to scale
+breaksList = seq(-2, 2, by = .2)
+
+####Plot####
+#I always use the euclidean distance and ward.D2 but there are other methods, too
+#Don't use the built in pheatmap scale option!
+pheatmap(mod_scale, show_rownames = F, show_colnames = T, 
+         cluster_rows = T, cluster_cols = T, 
+         scale = "none",
+         #I always manually scale my values and don't use this scale option. This makes it easier to find the samples in the heirarchical clusters
+         #Row scale: mod_scale <- t(scale(t(counts),center=T,scale=T))
+         #Column scale: mod_scale <- scale(counts,center=T,scale=T)
+         color = colorRampPalette(rev(brewer.pal(n = 10, name = "RdBu")))(length(breaksList)), # Defines the vector of colors for the legend (it has to be of the same lenght of breaksList)
+         breaks = breaksList, 
+         annotation_colors = colors.ann,
+         annotation_row = ann_row,
+         fontsize = 9,
+         clustering_method = "ward.D2")
+
+##Clustering for rows 
+d <- dist(mod_scale, method = "euclidean") #Just make sure this matches with your pheatmap code
+hc1 <- hclust(d, method = "ward.D2" ) #Just make sure this matches with your pheatmap code
+#Clustering
+sub_grp <- cutree(hc1, k = 4)
+#Making sub grp a DF
+df_clusters <- as.data.frame(sub_grp)
+
+#You can align these to your column annotations, and then since you have the names of the samples in each cluster, you can store that info and use elsewhere
+df_clusters <- df_clusters[match(rownames(mod_scale),rownames(df_clusters)),,drop=FALSE]
+
+#Add cluster variable to column annotations
+ann_row$H_Cluster <- as.factor(df_clusters$sub_grp)
+#Add color options for these clusters
+colors.ann$H_Cluster <- c("1"="#E3DEEE", "2"="#DB6AC0", "3"="#611300", "4"="#B87AEF")
+
+#Since you didn't use the built in heatmap scaling option, these should align perfectly with clusters on the dendrogram
+pheatmap(mod_scale, show_rownames = F, show_colnames = F, 
+         cluster_rows = T, cluster_cols = T, 
+         scale = "none",
+         color = colorRampPalette(rev(brewer.pal(n = 10, name = "RdBu")))(length(breaksList)), # Defines the vector of colors for the legend (it has to be of the same lenght of breaksList)
+         breaks = breaksList, 
+         annotation_colors = colors.ann,
+         annotation_row = ann_row,
+         fontsize = 9,
+         clustering_method = "ward.D2",
+         main="Mouse")
+
+
+
+}
+```
+
+### Heatmap for mouse_core
+```{r}
+Run_heatmap_mm(mm_core_KDvsNT4_mat)
+```
+### Heatmap for mouse_rim
+```{r}
+Run_heatmap_mm(mm_rim_KDvsNT4_mat)
+```
+### Heaptmap for rat_core
+```{r}
+Run_heatmap_rn(rn_core_KDvsNT4_mat)
+```
+### Heatmap for rat_rim
+```{r}
+Run_heatmap_rn(rn_rim_KDvsNT4_mat)
+```
+
+
+
+
+### Subsetting only genes that are available in the VI clusters
+```{r}
+modMat <- mm_core_KDvsNT4_mat[rownames(mm_core_KDvsNT4_mat) %in% c(mouse_geneset$mmusculus_homolog_ensembl_gene),]
+```
+
+### Row scale the count matrix to be plotted
+```{r}
+# Transposed to make genes column as scaling works on column
+mod_scale <- t(scale(t(modMat),center=T,scale=T))
+```
+
+### Create row annotation
+```{r}
+VI_cluster_common_genes <- mouse_geneset[match(rownames(mod_scale),mouse_geneset$mmusculus_homolog_ensembl_gene),]
+```
+
+### Create row annotation dataframe
+```{r}
+ann_row <- data.frame(Cluster=as.factor(VI_cluster_common_genes$Cluster))
+```
+
+### Make rownames of row annotation data frame the name of the genes (or the names of the rows for the object you're plotting)
+```{r}
+rownames(ann_row) <- VI_cluster_common_genes$mmusculus_homolog_ensembl_gene
+ann_row <- ann_row[match(rownames(mod_scale),rownames(ann_row)),,drop=FALSE]
+```
+
+### Make color annotations
+```{r}
+#For example, I picked these colors for the biological clusters
+hcl.colors(n=8, palette = "Spectral")
+
+colors.ann = list(
+                   Cluster=c("Cluster1"="#A71B4B", "Cluster2"="#F6AD3E", "Cluster3"="blue", "Cluster4"="green"))
+
+#You can change this based on how you want the colors to scale
+breaksList = seq(-2, 2, by = .2)
+```
+
+```{r}
+####Plot####
+#I always use the euclidean distance and ward.D2 but there are other methods, too
+#Don't use the built in pheatmap scale option!
+pheatmap(mod_scale, show_rownames = F, show_colnames = T, 
+         cluster_rows = T, cluster_cols = T, 
+         scale = "none",
+         #I always manually scale my values and don't use this scale option. This makes it easier to find the samples in the heirarchical clusters
+         #Row scale: mod_scale <- t(scale(t(counts),center=T,scale=T))
+         #Column scale: mod_scale <- scale(counts,center=T,scale=T)
+         color = colorRampPalette(rev(brewer.pal(n = 10, name = "RdBu")))(length(breaksList)), # Defines the vector of colors for the legend (it has to be of the same lenght of breaksList)
+         breaks = breaksList, 
+         annotation_colors = colors.ann,
+         annotation_row = ann_row,
+         fontsize = 9,
+         clustering_method = "ward.D2")
+
+```
+
+```{r}
+
+##Clustering for rows 
+d <- dist(mod_scale, method = "euclidean") #Just make sure this matches with your pheatmap code
+hc1 <- hclust(d, method = "ward.D2" ) #Just make sure this matches with your pheatmap code
+#Clustering
+sub_grp <- cutree(hc1, k = 4)
+#Making sub grp a DF
+df_clusters <- as.data.frame(sub_grp)
+
+#You can align these to your column annotations, and then since you have the names of the samples in each cluster, you can store that info and use elsewhere
+df_clusters <- df_clusters[match(rownames(mod_scale),rownames(df_clusters)),,drop=FALSE]
+
+#Add cluster variable to column annotations
+ann_row$H_Cluster <- as.factor(df_clusters$sub_grp)
+#Add color options for these clusters
+colors.ann$H_Cluster <- c("1"="#E3DEEE", "2"="#DB6AC0", "3"="#611300", "4"="#B87AEF")
+
+#Since you didn't use the built in heatmap scaling option, these should align perfectly with clusters on the dendrogram
+pheatmap(mod_scale, show_rownames = F, show_colnames = F, 
+         cluster_rows = T, cluster_cols = T, 
+         scale = "none",
+         color = colorRampPalette(rev(brewer.pal(n = 10, name = "RdBu")))(length(breaksList)), # Defines the vector of colors for the legend (it has to be of the same lenght of breaksList)
+         breaks = breaksList, 
+         annotation_colors = colors.ann,
+         annotation_row = ann_row,
+         fontsize = 9,
+         clustering_method = "ward.D2")
+
+
+```
+
+```{r}
+#This uses the same basic format as pheatmap, but you can semi-supervise each level of a variable
+ library(grid)
+#If you want semi-supervise based on a row variable and a column variable:
+semiPheatmap(mod_scale, showRownames =F, showColnames = F, 
+             clusterRows = T, clusterCols = T, scale = 'none', 
+             clusteringDistanceRows="euclidean",
+             clusteringDistanceCols = "euclidean",
+             color = colorRampPalette(rev(brewer.pal(n = 10, name = "RdBu")))(length(breaksList)), # Defines the vector of colors for the legend (it has to be of the same lenght of breaksList)
+             breaks = breaksList, 
+             annotationCol = ann_col,
+             annotationRow = ann_row,
+             annotationColors = colors.ann,
+             fontsize = 9,
+             clusteringMethod = "ward.D2", rowLabel = ann_row$Cluster)
+```
+
